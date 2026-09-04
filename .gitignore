@@ -1,0 +1,23 @@
+# build artifacts
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.pyc
+
+# bundled ffmpeg is downloaded by build.sh, not committed
+vendor/
+
+# local media / test output
+*.mp4
+*.mkv
+*.srt
+
+# macOS
+.DS_Store
+
+# any local session/config that might land here
+cookies.txt
+config.json
+*.html
+*.m3u8
