@@ -41,7 +41,8 @@ Features:
    **container** (mp4/mkv). **Apply these to all items** copies the settings
    across the batch.
 4. Choose a destination folder → **Download all**. Progress shows in the bar and
-   per row; files land as `Title [1080p].mp4`.
+   per row; files are named after the original title + release year, e.g.
+   `Louis C.K. Ridiculous (2026).mp4` (editable per item via double-click).
 
 ## The CLI (same engine)
 
