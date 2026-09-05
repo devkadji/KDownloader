@@ -250,7 +250,12 @@ def get_item(session, url):
     if not m:
         raise RuntimeError("no playable stream found on that page")
     playlist = json.loads(m.group(1))
-    return playlist
+    year = None
+    ym = re.search(r"Год выхода.*?</td>\s*<td[^>]*>(.*?)</td>", html, re.S)
+    if ym:
+        yy = re.search(r"(?:19|20)\d\d", ym.group(1))
+        year = yy.group(0) if yy else None
+    return playlist, year
 
 
 def parse_master(text, base_url):
@@ -292,14 +297,28 @@ def parse_master(text, base_url):
 
 def stream_info(session, item_url):
     """Fetch item + master, return a dict describing available tracks."""
-    playlist = get_item(session, item_url)
+    playlist, year = get_item(session, item_url)
     entry = playlist[0]
     master, mfinal = session.get(entry["manifest"])
     videos, audios, subs = parse_master(master, mfinal)
     return {"title": entry.get("title", "video"),
             "episode": entry.get("episode_title", ""),
+            "year": year,
             "manifest": entry["manifest"],
             "videos": videos, "audios": audios, "subs": subs}
+
+
+def default_basename(info):
+    """Default output filename base: prefer the original (right-hand) title —
+    kino.watch titles read 'Русское / Original' — plus episode, then the
+    release year in parentheses (before the extension). No resolution tag."""
+    parts = [p.strip() for p in info.get("title", "video").split(" / ")]
+    name = parts[-1] if len(parts) > 1 else parts[0]
+    if info.get("episode"):
+        name += " - " + info["episode"]
+    if info.get("year"):
+        name += f" ({info['year']})"
+    return safe_name(name)
 
 
 def variant_duration(session, media_playlist_url):
@@ -313,9 +332,12 @@ def variant_duration(session, media_playlist_url):
 
 # --------------------------------------------------------------- download ----
 def safe_name(s):
-    # Keep it human-readable: only replace characters illegal in a macOS
-    # filename ('/' and ':') plus control chars; trim edge dots/spaces.
-    s = re.sub(r"[/:\x00-\x1f]+", "_", s).strip(" .")
+    # Keep it human-readable. ':' is illegal in macOS filenames -> drop it
+    # (so "C.K.: Ridiculous" -> "C.K. Ridiculous"); '/' and control chars -> '_';
+    # collapse the resulting double spaces and trim edge dots/spaces.
+    s = s.replace(":", "")
+    s = re.sub(r"[/\x00-\x1f]+", "_", s)
+    s = re.sub(r"\s{2,}", " ", s).strip(" .")
     return s[:150] or "video"
 
 
@@ -401,14 +423,9 @@ def download(session, item_url, height, out_dir, progress_cb=None,
         info = stream_info(session, item_url)
     chosen, auds, subz = choose_tracks(info, height, audio_indices, include_subs)
 
-    if out_name:
-        base = safe_name(out_name)            # user-edited title = full filename base
-    else:
-        base = safe_name(info["title"].split("/")[0])
-        if info.get("episode"):
-            base += " - " + safe_name(info["episode"])
+    base = safe_name(out_name) if out_name else default_basename(info)
     ext = "mp4" if container == "mp4" else "mkv"
-    out_path = os.path.join(out_dir, base + f" [{chosen['height']}p].{ext}")
+    out_path = os.path.join(out_dir, base + "." + ext)
 
     dur = variant_duration(session, chosen["uri"])
     est = estimate_size(chosen, auds, dur)

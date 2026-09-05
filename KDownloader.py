@@ -208,10 +208,9 @@ class App(ttk.Frame):
         self.q.put(fn)
 
     def _title_of(self, it):
-        t = it["info"]["title"].split("/")[0].strip()
-        if it["info"].get("episode"):
-            t += " — " + it["info"]["episode"]
-        return t
+        # default = original (English) title + (year); the shown title is also
+        # the output filename base, and the user can edit it.
+        return core.default_basename(it["info"])
 
     def _refresh_row(self, it):
         vals = (f"{it['height']}p",
