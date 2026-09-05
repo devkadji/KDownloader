@@ -13,6 +13,7 @@ import queue
 import sys
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk, filedialog, messagebox
 
 import kino_core as core
@@ -102,11 +103,21 @@ class App(ttk.Frame):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor="center")
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        # double-click: on a heading separator -> auto-fit that column;
+        #               on a Title cell -> edit the title (output filename)
+        self.tree.bind("<Double-Button-1>", self._on_tree_double)
+        self._tree_font = tkfont.nametofont("TkDefaultFont")
 
         # right-click / control-click context menu on the queue
         self.tree_menu = tk.Menu(self, tearoff=0)
+        self.tree_menu.add_command(label="Rename (edit filename)…",
+                                   command=self._rename_sel)
+        self.tree_menu.add_separator()
         self.tree_menu.add_command(label="Remove", command=self._remove_sel)
         self.tree_menu.add_command(label="Clear finished", command=self._clear_done)
+        self.tree_menu.add_separator()
+        self.tree_menu.add_command(label="Fit columns to content",
+                                   command=self._autofit_all)
         for seq in ("<Button-2>", "<Button-3>", "<Control-Button-1>"):
             self.tree.bind(seq, self._popup_menu)
 
@@ -207,13 +218,78 @@ class App(ttk.Frame):
                 f"{len(it['audio_idx'])}/{len(it['ref_audios'])}",
                 "all" if it["subs"] else "none",
                 it["container"], it["status"])
-        self.tree.item(it["iid"], values=vals)
+        self.tree.item(it["iid"], text=it.get("title", ""), values=vals)
 
     def _sel_item(self):
         sel = self.tree.selection()
         if not sel:
             return None
         return next((x for x in self.items if x["iid"] == sel[0]), None)
+
+    # ---- column auto-fit (pure tkinter; no deps) ---------------------------
+    def _autofit_column(self, col):
+        f = self._tree_font
+        rows = self.tree.get_children()
+        if col == "#0":
+            texts = [self.tree.item(i, "text") for i in rows]
+            texts.append(self.tree.heading("#0", "text"))
+            pad = 28  # room for the disclosure indent
+        else:
+            texts = [self.tree.set(i, col) for i in rows]
+            texts.append(self.tree.heading(col, "text"))
+            pad = 20
+        width = max((f.measure(t) for t in texts if t), default=40) + pad
+        self.tree.column(col, width=max(width, 40))
+
+    def _autofit_all(self):
+        for col in ("#0",) + self.tree["columns"]:
+            self._autofit_column(col)
+
+    # ---- inline title editing (= output filename) -------------------------
+    def _on_tree_double(self, event):
+        region = self.tree.identify_region(event.x, event.y)
+        if region == "separator":
+            col = self.tree.identify_column(event.x)
+            if col:
+                self._autofit_column(col)
+            return "break"
+        if region in ("tree", "cell"):
+            col = self.tree.identify_column(event.x)
+            row = self.tree.identify_row(event.y)
+            if row and col == "#0":
+                self._begin_edit_title(row)
+                return "break"
+
+    def _rename_sel(self):
+        it = self._sel_item()
+        if it:
+            self._begin_edit_title(it["iid"])
+
+    def _begin_edit_title(self, iid):
+        it = next((x for x in self.items if x["iid"] == iid), None)
+        if not it:
+            return
+        bbox = self.tree.bbox(iid, "#0")
+        if not bbox:
+            return
+        x, y, w, h = bbox
+        entry = ttk.Entry(self.tree)
+        entry.place(x=x, y=y, width=max(w, 200), height=h)
+        entry.insert(0, it.get("title", ""))
+        entry.select_range(0, "end")
+        entry.focus_set()
+
+        def commit(_evt=None):
+            new = entry.get().strip()
+            entry.destroy()
+            if new:
+                it["title"] = new
+                self._refresh_row(it)
+                self._autofit_column("#0")
+
+        entry.bind("<Return>", commit)
+        entry.bind("<FocusOut>", commit)
+        entry.bind("<Escape>", lambda e: entry.destroy())
 
     # ============================================================== ACCOUNT ==
     def _set_logged_in(self, ok):
@@ -315,10 +391,11 @@ class App(ttk.Frame):
                   "height": info["videos"][0]["height"],
                   "ref_audios": ref, "audio_idx": set(range(len(ref))),
                   "subs": True, "container": "mp4", "status": "ready"}
+            it["title"] = self._title_of(it)
             def add():
                 self.items.append(it)
-                self.tree.item(iid, text=self._title_of(it))
                 self._refresh_row(it)
+                self._autofit_all()
                 self.dl_btn.configure(state="normal")
             self._post(add)
         except Exception as e:
@@ -388,6 +465,7 @@ class App(ttk.Frame):
             n = len(it["ref_audios"])
             it["audio_idx"] = {i for i in src["audio_idx"] if i < n} or set(range(n))
             self._refresh_row(it)
+        self._autofit_all()
 
     def _popup_menu(self, event):
         row = self.tree.identify_row(event.y)
@@ -456,7 +534,7 @@ class App(ttk.Frame):
                         self.session, it["url"], it["height"], self.outdir,
                         progress_cb=prog, audio_indices=it["audio_idx"],
                         include_subs=it["subs"], container=it["container"],
-                        info=it["info"])
+                        info=it["info"], out_name=it.get("title"))
                     self._post(lambda it=it, out=out: (it.update(status="done ✓"),
                                                        self._refresh_row(it),
                                                        self._logmsg(f"Saved → {out}")))

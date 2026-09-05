@@ -313,7 +313,10 @@ def variant_duration(session, media_playlist_url):
 
 # --------------------------------------------------------------- download ----
 def safe_name(s):
-    return re.sub(r"[^\w.\- ]+", "_", s).strip()[:120] or "video"
+    # Keep it human-readable: only replace characters illegal in a macOS
+    # filename ('/' and ':') plus control chars; trim edge dots/spaces.
+    s = re.sub(r"[/:\x00-\x1f]+", "_", s).strip(" .")
+    return s[:150] or "video"
 
 
 def audio_bitrate_guess(a):
@@ -398,9 +401,12 @@ def download(session, item_url, height, out_dir, progress_cb=None,
         info = stream_info(session, item_url)
     chosen, auds, subz = choose_tracks(info, height, audio_indices, include_subs)
 
-    base = out_name or safe_name(info["title"].split("/")[0])
-    if info.get("episode"):
-        base += " - " + safe_name(info["episode"])
+    if out_name:
+        base = safe_name(out_name)            # user-edited title = full filename base
+    else:
+        base = safe_name(info["title"].split("/")[0])
+        if info.get("episode"):
+            base += " - " + safe_name(info["episode"])
     ext = "mp4" if container == "mp4" else "mkv"
     out_path = os.path.join(out_dir, base + f" [{chosen['height']}p].{ext}")
 
